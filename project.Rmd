@@ -1,0 +1,127 @@
+---
+title: "Project"
+author: "Nathan Rosenfeld"
+date: "\today"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+Pres<-read.table("/users/n_o_r/documents/education/sta 5030/countypres_2000-2020.csv",header=T,sep=",")
+
+Pres<-subset(Pres,select=-c(state,office,candidate,version,mode))
+Pres<-aggregate(.~year+county_fips+party+county_name+state_po+totalvotes,data=Pres,FUN=sum)
+PresDemo<-Pres[Pres$party %in% "DEMOCRAT",]
+PresRepub<-Pres[Pres$party%in%"REPUBLICAN",]
+newPres<-merge(PresDemo,PresRepub,by=c("county_fips","year","state_po","county_name","totalvotes"))
+
+# newPres[rowSums(is.na(newPres)) != ncol(newPres),]
+# newPres<-unique(newPres)
+newPres<-cbind(newPres,seq(0,0,1))
+names(newPres)[10]<-"Rmargin"
+newPres$Rmargin<-newPres$candidatevotes.y-newPres$candidatevotes.x
+newPres$Rmargin<- newPres$Rmargin/newPres$totalvotes
+newPres<-subset(newPres,select=-c(party.x,party.y,candidatevotes.x,candidatevotes.y,totalvotes))
+PresFinal<-newPres[newPres$year==2000,]
+PresFinal<-subset(PresFinal,select=-year)
+names(PresFinal)[4]<-"2000"
+PresFinal<-merge(PresFinal,newPres[newPres$year==2004,],by=c("county_fips","state_po","county_name"))
+PresFinal<-subset(PresFinal,select=-year)
+names(PresFinal)[5]<-"2004"
+PresFinal<-merge(PresFinal,newPres[newPres$year==2008,],by=c("county_fips","state_po","county_name"))
+PresFinal<-subset(PresFinal,select=-year)
+names(PresFinal)[6]<-"2008"
+PresFinal<-merge(PresFinal,newPres[newPres$year==2012,],by=c("county_fips","state_po","county_name"))
+PresFinal<-subset(PresFinal,select=-year)
+names(PresFinal)[7]<-"2012"
+PresFinal<-merge(PresFinal,newPres[newPres$year==2016,],by=c("county_fips","state_po","county_name"))
+PresFinal<-subset(PresFinal,select=-year)
+names(PresFinal)[8]<-"2016"
+PresFinal<-merge(PresFinal,newPres[newPres$year==2020,],by=c("county_fips","state_po","county_name"))
+PresFinal<-subset(PresFinal,select=-year)
+names(PresFinal)[9]<-"2020"
+write.csv(PresFinal,"/users/n_o_r/documents/education/sta 5030/PresFinal.csv")
+
+n<-as.integer(count(PresFinal))
+LM<-numeric(n)
+X<-4*(0:5)
+for (i in 1:n){
+LM[i]<-coefficients(lm(as.double(PresFinal[i,(4:9)])~X))[2]
+}
+PresFinal<-cbind(PresFinal,LM)
+names(PresFinal)[10]<-"votingSlope"
+
+
+
+
+OD<-read.table("/users/n_o_r/downloads/NCHS_-_Drug_Poisoning_Mortality_by_County__United_States (1).csv",header = T,sep = ",")
+OD<-subset(OD,select=-c(State,FIPS.State,County,Population))
+ODnew<-OD[OD$Year==1999,]
+ODnew<-subset(ODnew,select=-(Year))
+names(ODnew)[3]<-"1999"
+for (i in (2000:2015)){
+ODnew<-merge(ODnew,OD[OD$Year == i,], by=c("FIPS","ST"))
+ODnew<-subset(ODnew,select=-(Year))
+names(ODnew)[i-1996]<-i
+}
+extractMean<-function(X){
+V<-str_split(X,pattern="-")
+V<-as.double(unlist(V))
+(V[1]+V[2])/2
+}
+ODtest<-ODnew
+for (i in 3:19){
+  ODnew[,i]<-as.numeric(sapply(ODnew[,i],extractMean))
+}
+#ODnew[,(3:19)]<-extractMean(ODnew[,(3:19)])
+n<-as.integer(count(ODnew))
+LM<-numeric(n)
+X<-(1999:2015)
+for (i in 1:n){
+LM[i]<-coefficients(lm(as.double(ODnew[i,(3:19)])~X))[2]
+}
+ODnew<-cbind(ODnew,LM)
+names(ODnew)[20]<-"overdoseSlope"
+
+PresFinal<-rename(PresFinal, FIPS = county_fips)
+PresToMerge<-subset(PresFinal,select=c(FIPS,state_po,votingSlope))
+ODtoMerge<-subset(ODnew,select=c(FIPS,ST,overdoseSlope))
+ODtoMerge<-rename(ODtoMerge,state_po=ST)
+finalMerged<-merge(PresToMerge,ODtoMerge,by=c("state_po","FIPS"))
+n<-as.integer(count(finalMerged))
+xmin<-min(finalMerged$overdoseSlope)
+xmax<-max(finalMerged$overdoseSlope)
+ymin<-min(finalMerged$votingSlope)
+ymax<-max(finalMerged$votingSlope)
+png("/users/n_o_r/documents/education/sta 5030/DATAPLOT.png")
+for (i in 1:n){
+plot(finalMerged$overdoseSlope[i],finalMerged$votingSlope[i],xlim=c(xmin,xmax),ylim=c(ymin,ymax),xlab="Increase in Overdose Deaths by Population",ylab="Shift of Two-Party Vote Towards Republican / Total Votes",col="sky blue")
+par(new=T)
+}
+Y<-finalMerged$votingSlope
+X<-finalMerged$overdoseSlope
+LM<-lm(Y~X)
+abline(coefficients(LM)[1],coefficients(LM)[2])
+CI<-predict(LM,int="c")  #find confidence intervals
+CI<-CI[order(X),]
+matlines(sort(X),CI,xlim=c(xmin,xmax),ylim=c(ymin,ymax),col="red")  
+PI<-predict(LM,int="p")                             
+PI<-PI[order(X),]    #find prediction intervals
+matlines(sort(X),PI,xlim=c(xmin,xmax),ylim=c(ymin,ymax),col="brown")
+legend(5,9,legend=c("regression line","confidence band","prediction band"),col=c("black","red","brown"),lty=1:3,cex=0.8)
+par(new=F)
+dev.off()
+png("/users/n_o_r/documents/education/sta 5030/QQNORM.png")
+plot(LM,which=2)
+dev.off()
+```
+
+```{r echo=FALSE}
+summary(LM)
+
+```
